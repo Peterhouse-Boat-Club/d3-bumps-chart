@@ -6,864 +6,950 @@ import 'd3-transition'; // We require the side-effects of importing
 
 import { crewColor, renderName } from './util.js';
 
+// TODO: Zoom out too far and undefined error - too little data
+
+// Pixels to render
+// Higher number = higher DPI
+// However, this only adjust the width.
 export const widthOfOneYear = 110;
 
+const heightOfOneCrew = 14;
+const widthWithoutLines = 310;
+const initialViewBoxX = -165;
+const initialViewBoxY = 0;
+const yMarginTop = 10;
+const transitionLength = 400;
+
+const labelFontSize = '16px';
+const yearsFontSize = '22px';
+const strokeWidthHighlighed = '3px';
+const strokeWidthHover = '2px';
+
 export default function() {
-  let svg;
-  let _data;
+    let svg;
+    let _data;
 
-  let hammertime;
+    let hammertime;
 
-  let year;
-  let yearRange;
-  let numYearsToView = 5;
-  let highlightedCrew;
-  let selectedCrews = new Set();
-  let windowWidth;
+    let year;
+    let yearRange;
+    let numYearsToView = 5;
+    let highlightedCrew;
+    let selectedCrews = new Set();
+    let windowWidth;
 
-  let container;
-  let g;
-  let divisionsGroup;
-  let yearsGroup;
-  let labelsGroup;
-  let linesGroup;
-  let xScale;
-  let dayShift;
+    // Used to highlight all crews including a specified string.
+    let highlightFilterTerm = "";
 
-  let setupComplete = false;
+    let resultLineColor = '#aaa'; // TODO: Reinstate previous behaviour
+    let resultLineDropShadow = false;
+    let resultLineOpacityFull = '1';
+    let resultLineOpacityFaded = '0.2';
 
-  const listeners = dispatch(
-    'selectYear',
-    'highlightCrew',
-    'toggleSelectedCrew'
-  );
+    // TODO: Reinstate previous behaviour
+    let divisionColors = ['#FFFFFF', '#E2E2E2']; //['#FFFFFF', '#C4C4C4'];
+    let divisionOutlineStrokeColor = '#c85400'; //'black';
 
-  function chart(selection) {
-    selection.each(function(data) {
-      _data = data;
+    let container;
+    let g;
+    let divisionsGroup;
+    let yearsGroup;
+    let labelsGroup;
+    let linesGroup;
+    let xScale;
+    let dayShift;
 
-      if (!setupComplete) {
-        setup(selection);
-        setupComplete = true;
-      }
+    let setupComplete = false;
 
-      render();
-    });
-  }
+    const listeners = dispatch(
+        'selectYear',
+        'highlightCrew',
+        'toggleSelectedCrew',
+    );
 
-  function setup(el) {
-    svg = el.select('svg');
-    container = svg.append('g').attr('class', 'results-container');
-    g = container.append('g').attr('class', 'results');
-    container.append('rect').attr('class', 'touch-target');
+    function chart(selection) {
+        selection.each(function(data) {
+            _data = data;
 
-    hammertime = new Hammer(svg.node()); // eslint-disable-line no-undef
+            if (!setupComplete) {
+                setup(selection);
+                setupComplete = true;
+            }
 
-    hammertime.on('panmove', function(ev) {
-      g.attr('transform', `translate(${ev.deltaX - xScale(dayShift)},0)`);
-    });
-
-    hammertime.on('panend', function(ev) {
-      const x = xScale.invert(-ev.deltaX + xScale(dayShift));
-
-      let i = scan(
-        _data.divisions,
-        (a, b) => Math.abs(a.startDay - x) - Math.abs(b.startDay - x)
-      );
-
-      // Too far to the right
-      if (i + numYearsToView > _data.divisions.length) {
-        i = _data.divisions.length - numYearsToView;
-      }
-
-      year = _data.divisions[i].year;
-
-      selectYear(
-        _data.divisions[i].year,
-        _data.divisions[i + numYearsToView - 1].year
-      );
-    });
-
-    divisionsGroup = g.append('g').attr('class', 'divisions');
-    yearsGroup = g.append('g').attr('class', 'years');
-    linesGroup = g.append('g').attr('class', 'lines');
-    labelsGroup = svg.append('g').attr('class', 'labels');
-
-    createClipPath(svg);
-    createDropShadowFilter(svg);
-  }
-
-  function render() {
-    const results = _data;
-
-    // If we have no results or no range of years return early
-    if (
-      results === undefined ||
-      results.crews.length === 0 ||
-      yearRange === null
-    ) {
-      return;
+            render();
+        });
     }
 
-    let i = scan(
-      _data.divisions,
-      (a, b) => Math.abs(a.year - year) - Math.abs(b.year - year)
-    );
+    function setup(el) {
+        svg = el.select('svg');
+        container = svg.append('g').attr('class', 'results-container');
+        g = container.append('g').attr('class', 'results');
+        container.append('rect').attr('class', 'touch-target');
 
-    // Too far to the right
-    if (i + numYearsToView > _data.divisions.length) {
-      i = _data.divisions.length - numYearsToView;
+        hammertime = new Hammer(svg.node()); // eslint-disable-line no-undef
+
+        hammertime.on('panmove', function(ev) {
+            g.attr('transform', `translate(${ev.deltaX - xScale(dayShift)},0)`);
+        });
+
+        hammertime.on('panend', function(ev) {
+            const x = xScale.invert(-ev.deltaX + xScale(dayShift));
+
+            let i = scan(
+                _data.divisions,
+                (a, b) => Math.abs(a.startDay - x) - Math.abs(b.startDay - x)
+            );
+            typeof(i) === "undefined" ? i = 0: i = i;
+
+            // Limit the maximum number of years to that we have data for
+            if (numYearsToView > _data.divisions.length) {
+                numYearsToView = _data.divisions.length;
+            }
+
+            // Too far to the right
+            if (i + numYearsToView > _data.divisions.length) {
+                i = _data.divisions.length - numYearsToView;
+            }
+
+            year = _data.divisions[i].year;
+
+            selectYear(
+                _data.divisions[i].year,
+                _data.divisions[i + numYearsToView - 1].year
+            );
+        });
+
+        divisionsGroup = g.append('g').attr('class', 'divisions');
+        yearsGroup = g.append('g').attr('class', 'years');
+        linesGroup = g.append('g').attr('class', 'lines');
+        labelsGroup = svg.append('g').attr('class', 'labels');
+
+        createClipPath(svg);
+        createDropShadowFilter(svg);
     }
 
-    yearRange = {
-      start: _data.divisions[i].year,
-      end: _data.divisions[i + numYearsToView - 1].year,
-    };
+    function render() {
+        const results = _data;
 
-    const crews = results.crews;
+        // If we have no results or no range of years return early
+        if (
+            results === undefined ||
+            results.crews.length === 0 ||
+            yearRange === null
+        ) {
+            return;
+        }
 
-    const heightOfOneCrew = 34;
-    const widthWithoutLines = 310;
-    const initialViewBoxX = -165;
-    const initialViewBoxY = 0;
-    const yMarginTop = 10;
-    const transitionLength = 400;
+        let i = scan(
+            _data.divisions,
+            (a, b) => Math.abs(a.year - year) - Math.abs(b.year - year)
+        );
+        typeof(i) === "undefined" ? i = 0: i = i;
 
-    crews.forEach(crew => (crew.highlighted = selectedCrews.has(crew.name)));
-    crews.forEach(crew => (crew.hover = highlightedCrew === crew.name));
+        // Limit the maximum number of years to that we have data for
+        if (numYearsToView > _data.divisions.length) {
+            numYearsToView = _data.divisions.length;
+        }
 
-    const yDomainMax =
-      crews.length > 0
-        ? max(crews, c => max(c.values.filter(d => d !== null), v => v.pos))
-        : 0;
+        // Too far to the right
+        if (i + numYearsToView > _data.divisions.length) {
+            i = _data.divisions.length - numYearsToView;
+        }
 
-    const xDomain = [];
-    const xRange = [];
-    let count = 0;
+        yearRange = {
+            start: _data.divisions[i].year,
+            end: _data.divisions[i + numYearsToView - 1].year,
+        };
 
-    crews[0].valuesSplit.forEach(d => {
-      xDomain.push(d.values[0].day);
-      xDomain.push(d.values[d.values.length - 1].day);
-      xRange.push(((count * 5) / 4) * widthOfOneYear);
-      xRange.push(((count * 5) / 4) * widthOfOneYear + widthOfOneYear);
-      count += 1;
-    });
+        const crews = results.crews;
 
-    xScale = scaleLinear()
-      .domain(xDomain)
-      .range(xRange);
+        // Highlight crews
+        crews.forEach(crew => {
+            // Highlight crews that are selected
+            crew.highlighted = selectedCrews.has(crew.name);
 
-    // TODO: yScale origin changing causes charts to move about when changing data sets
-    const yScale = scaleLinear()
-      .domain([-1, yDomainMax])
-      .range([yMarginTop, yDomainMax * heightOfOneCrew - yMarginTop]);
+            // Highlight crews including the filter term
+            if (typeof highlightFilterTerm === "string") {
+                let filter = highlightFilterTerm.trim().toLowerCase();
 
-    const viewBoxWidth =
-      widthWithoutLines + ((widthOfOneYear * 5) / 4) * numYearsToView;
+                if (filter.length > 0 && crew.name.toLowerCase().includes(filter)) {
+                    crew.highlighted = true;
+                }
+            }
 
-    const viewBoxHeight = yDomainMax * heightOfOneCrew;
-    const width = windowWidth;
+            // Highlight a crew when it's name is hovered over
+            crew.hover = highlightedCrew === crew.name;
+        });
 
-    svg
-      .attr('height', (viewBoxHeight / viewBoxWidth) * width)
-      .attr(
-        'viewBox',
-        `${initialViewBoxX}, ${initialViewBoxY}, ${viewBoxWidth}, ${viewBoxHeight}`
-      );
+        const yDomainMax =
+            crews.length > 0 ?
+            max(crews, c => max(c.values.filter(d => d !== null), v => v.pos)) :
+            0;
 
-    const startDay = results.divisions.find(d => d.year === yearRange.start)
-      .startDay;
+        const xDomain = [];
+        const xRange = [];
+        let count = 0;
 
-    const endDay =
-      results.divisions.find(d => d.year === yearRange.end).startDay +
-      results.divisions.find(d => d.year === yearRange.end).numDays;
+        crews[0].valuesSplit.forEach(d => {
+            xDomain.push(d.values[0].day);
+            xDomain.push(d.values[d.values.length - 1].day);
+            xRange.push(((count * 5) / 4) * widthOfOneYear);
+            xRange.push(((count * 5) / 4) * widthOfOneYear + widthOfOneYear);
+            count += 1;
+        });
 
-    dayShift = startDay;
-    const startLabelIndex = startDay;
-    let finishLabelIndex = endDay;
+        xScale = scaleLinear()
+            .domain(xDomain)
+            .range(xRange);
 
-    // Check for incomplete last event, e.g. only 2 days completed of the 4
-    const maxDays = max(
-      results.crews.map(c =>
-        max(c.values.filter(v => v.pos > -1 || v.day < finishLabelIndex - 5))
-      )
-    );
+        // TODO: yScale origin changing causes charts to move about when changing data sets
+        const yScale = scaleLinear()
+            .domain([-1, yDomainMax])
+            .range([yMarginTop, yDomainMax * heightOfOneCrew - yMarginTop]);
 
-    if (finishLabelIndex > maxDays - 1) {
-      finishLabelIndex = maxDays - 1;
-    }
+        const viewBoxWidth =
+            widthWithoutLines + ((widthOfOneYear * 5) / 4) * numYearsToView;
 
-    container
-      .select('.touch-target')
-      .attr('x', 0)
-      .attr('y', 0)
-      .attr('width', width)
-      .attr('height', viewBoxHeight + 16)
-      .attr('fill', 'transparent');
+        const viewBoxHeight = yDomainMax * heightOfOneCrew;
+        const width = windowWidth;
 
-    g.attr('transform', `translate(${-xScale(dayShift)},0)`);
-    renderClipPath(svg, viewBoxHeight);
-    renderDivisions(results, divisionsGroup, xScale, yScale);
+        svg
+            .attr('height', (viewBoxHeight / viewBoxWidth) * width)
+            .attr(
+                'viewBox',
+                `${initialViewBoxX}, ${initialViewBoxY}, ${viewBoxWidth}, ${viewBoxHeight}`
+            );
 
-    renderYears(results, yearsGroup, xScale, yScale);
+        const startDay = results.divisions.find(d => d.year === yearRange.start)
+            .startDay;
 
-    renderCrews(
-      crews,
-      linesGroup,
-      xScale,
-      yScale,
-      selectedCrews,
-      transitionLength
-    );
+        const endDay =
+            results.divisions.find(d => d.year === yearRange.end).startDay +
+            results.divisions.find(d => d.year === yearRange.end).numDays;
 
-    renderFinishLabel(
-      crews,
-      labelsGroup,
-      finishLabelIndex,
-      yScale,
-      transitionLength,
-      toggleSelectedCrew,
-      highlightCrew
-    );
+        dayShift = startDay;
+        const startLabelIndex = startDay;
+        let finishLabelIndex = endDay;
 
-    renderStartLabel(
-      crews,
-      labelsGroup,
-      startLabelIndex,
-      yScale,
-      transitionLength,
-      toggleSelectedCrew,
-      highlightCrew
-    );
-
-    renderNumbersRight(
-      crews,
-      labelsGroup,
-      finishLabelIndex,
-      numYearsToView,
-      yScale,
-      transitionLength
-    );
-
-    renderNumbersLeft(
-      results.divisions,
-      labelsGroup,
-      yearRange.start,
-      yScale,
-      transitionLength
-    );
-  }
-
-  function selectYear(start, end) {
-    yearRange = { start: start, end: end };
-    render();
-    listeners.call('selectYear', chart, start, end);
-  }
-
-  function toggleSelectedCrew(name) {
-    if (selectedCrews.has(name)) {
-      selectedCrews.delete(name);
-    } else {
-      selectedCrews.add(name);
-    }
-
-    render();
-    listeners.call('toggleSelectedCrew', chart, name);
-  }
-
-  function highlightCrew(name) {
-    highlightedCrew = name;
-    render();
-    listeners.call('highlightCrew', chart, name);
-  }
-
-  function createClipPath(svg) {
-    const clipPathId = 'clip' + ((Math.random() * 100000) | 0); // TODO: Require a unique id
-
-    svg
-      .append('clipPath')
-      .attr('id', clipPathId)
-      .append('rect')
-      .attr('width', 80)
-      .attr('height', 800);
-
-    const clipPathUrl = 'url(#' + clipPathId + ')';
-
-    svg.select('.results-container').attr('clip-path', clipPathUrl);
-  }
-
-  function createDropShadowFilter(svg) {
-    const defs = svg.append('defs');
-
-    const dropShadowFilter = defs
-      .append('filter')
-      .attr('filterUnits', 'userSpaceOnUse')
-      .attr('width', 100000) // FIXME: Should depend on data
-      .attr('id', 'dropShadow');
-
-    dropShadowFilter
-      .append('feGaussianBlur')
-      .attr('stdDeviation', 0)
-      .attr('in', 'SourceAlpha');
-
-    dropShadowFilter
-      .append('feOffset')
-      .attr('dx', 0)
-      .attr('dy', 2);
-
-    const dropShadowMerge = dropShadowFilter.append('feMerge');
-    dropShadowMerge.append('feMergeNode');
-    dropShadowMerge.append('feMergeNode').attr('in', 'SourceGraphic');
-  }
-
-  function renderClipPath(svg, viewBoxHeight) {
-    svg
-      .select('clipPath')
-      .select('rect')
-      .datum(numYearsToView)
-      .attr('width', d => ((d * 5 - 1) / 4) * widthOfOneYear)
-      .attr('height', viewBoxHeight + 16); // TODO: Work out why we need to extend the height
-  }
-
-  function renderDivisions(results, g, xScale, yScale) {
-    const divisionContainer = g
-      .selectAll('.division-year')
-      .data(results.divisions, d => d.year);
-
-    divisionContainer.exit().remove();
-
-    const divisionContainerEnter = divisionContainer
-      .enter()
-      .append('g')
-      .attr('class', 'division-year')
-      .attr('id', d => d.year);
-
-    divisionContainerEnter
-      .selectAll('rect.division')
-      .data(d =>
-        d.divisions.map(division => ({
-          start: division.start,
-          size: division.size,
-          startDay: d.startDay,
-          numDays: d.numDays,
-        }))
-      )
-      .enter()
-      .append('rect')
-      .attr('class', 'division')
-      .attr('id', d => d.start)
-      .style('stroke', 'black')
-      .style('fill', (d, i) => (i % 2 ? '#C4C4C4' : '#FFFFFF'))
-      .attr('y', d => yScale(d.start - 0.5))
-      .attr('width', widthOfOneYear)
-      .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
-
-    divisionContainerEnter
-      .merge(divisionContainer)
-      .attr('transform', d => `translate(${xScale(d.startDay)},0)`);
-
-    const division = divisionContainer.selectAll('rect.division').data(d =>
-      d.divisions.map(division => ({
-        start: division.start,
-        size: division.size,
-        startDay: d.startDay,
-        numDays: d.numDays,
-      }))
-    );
-
-    division
-      .enter()
-      .append('rect')
-      .attr('class', 'division')
-      .attr('id', d => d.start)
-      .style('stroke', 'black')
-      .style('fill', (d, i) => (i % 2 ? '#C4C4C4' : '#FFFFFF'))
-      .attr('y', d => yScale(d.start - 0.5))
-      .attr('width', widthOfOneYear)
-      .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
-
-    const rects = divisionContainer.selectAll('rect.division').data(d =>
-      d.divisions.map(division => ({
-        start: division.start,
-        size: division.size,
-        startDay: d.startDay,
-        numDays: d.numDays,
-      }))
-    );
-
-    rects.exit().remove();
-
-    rects
-      .attr('y', d => yScale(d.start - 0.5))
-      .attr('width', widthOfOneYear)
-      .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
-
-    rects
-      .enter()
-      .append('rect')
-      .attr('class', 'division')
-      .attr('id', d => d.start)
-      .style('stroke', 'black')
-      .style('fill', (d, i) => (i % 2 ? '#C4C4C4' : '#FFFFFF'))
-      .attr('y', d => yScale(d.start - 0.5))
-      .attr('width', widthOfOneYear)
-      .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
-  }
-
-  function renderYears(results, g, xScale, yScale) {
-    const years = g
-      .selectAll('.year')
-      .data(results.divisions.map(d => d.year), d => d);
-
-    years
-      .enter()
-      .append('text')
-      .attr('class', 'year')
-      .attr('x', d => {
-        const division = results.divisions.find(
-          division => division.year === d
+        // Check for incomplete last event, e.g. only 2 days completed of the 4
+        const maxDays = max(
+            results.crews.map(c =>
+                max(c.values.filter(v => v.pos > -1 || v.day < finishLabelIndex - 5))
+            )
         );
 
-        if (division === undefined) {
-          return;
+        if (finishLabelIndex > maxDays - 1) {
+            finishLabelIndex = maxDays - 1;
         }
 
-        return xScale(division.startDay + division.numDays / 2);
-      })
-      .attr('y', yScale(0))
-      .style('font-size', '22px')
-      .attr('text-anchor', 'middle')
-      .text(d => d);
+        container
+            .select('.touch-target')
+            .attr('x', 0)
+            .attr('y', 0)
+            .attr('width', width)
+            .attr('height', viewBoxHeight + 16)
+            .attr('fill', 'transparent');
 
-    years.attr('x', d => {
-      const division = results.divisions.find(division => division.year === d);
+        g.attr('transform', `translate(${-xScale(dayShift)},0)`);
+        renderClipPath(svg, viewBoxHeight);
+        renderDivisions(results, divisionsGroup, xScale, yScale);
 
-      if (division === undefined) {
-        return;
-      }
+        renderYears(results, yearsGroup, xScale, yScale);
 
-      return xScale(division.startDay + division.numDays / 2);
-    });
+        renderCrews(
+            crews,
+            linesGroup,
+            xScale,
+            yScale,
+            selectedCrews,
+            transitionLength
+        );
 
-    years.exit().remove();
-  }
+        renderFinishLabel(
+            crews,
+            labelsGroup,
+            finishLabelIndex,
+            yScale,
+            transitionLength,
+            toggleSelectedCrew,
+            highlightCrew
+        );
 
-  function renderCrews(data, g, xScale, yScale, selectedCrews) {
-    const lineFunc = line()
-      .defined(d => d !== null && d.pos > -1)
-      .x(d => xScale(d.day))
-      .y(d => yScale(d.pos));
+        renderStartLabel(
+            crews,
+            labelsGroup,
+            startLabelIndex,
+            yScale,
+            transitionLength,
+            toggleSelectedCrew,
+            highlightCrew
+        );
 
-    const crewContainer = g.selectAll('.line').data(data, d => d.name);
+        renderNumbersRight(
+            crews,
+            labelsGroup,
+            finishLabelIndex,
+            numYearsToView,
+            yScale,
+            transitionLength
+        );
 
-    crewContainer.exit().remove();
-
-    const crewContainerEnter = crewContainer
-      .enter()
-      .append('g')
-      .attr('class', d => `line ${d.name.replace(/ /g, '-')}`)
-      .classed('highlighted', d => d.highlighted)
-      .style('filter', d =>
-        d.highlighted || d.hover ? 'url(#dropShadow)' : ''
-      )
-      .style('fill', 'none')
-      .style('stroke', d =>
-        d.highlighted || d.hover ? crewColor(d.name) : '#000000'
-      )
-      .style('stroke-width', d => (d.highlighted || d.hover ? '3px' : '2px'))
-      .style('stroke-opacity', d =>
-        selectedCrews.size > 0 ? (d.highlighted || d.hover ? '1' : '0.5') : '1'
-      );
-
-    crewContainerEnter
-      .selectAll('path.active')
-      .data(d => d.valuesSplit)
-      .enter()
-      .append('path')
-      .attr('class', 'active')
-      .style('cursor', 'pointer')
-      .classed('blades', d => d.blades)
-      .classed('spoons', d => d.spoons)
-      .style('stroke-dasharray', d =>
-        d.blades ? '10,5' : d.spoons ? '5,5' : null
-      )
-      .attr('d', d => lineFunc(d.values));
-
-    crewContainerEnter
-      .selectAll('path.background')
-      .data(d => [d], d => d.name)
-      .enter()
-      .append('path')
-      .attr('class', 'background')
-      .attr('d', d => lineFunc(d.values))
-      .style('stroke-opacity', '0.1');
-
-    crewContainerEnter
-      .merge(crewContainer)
-      .classed('highlighted', d => d.highlighted)
-      .style('filter', d =>
-        d.highlighted || d.hover ? 'url(#dropShadow)' : ''
-      )
-      .style('fill', 'none')
-      .style('stroke', d =>
-        d.highlighted || d.hover ? crewColor(d.name) : '#000000'
-      )
-      .style('stroke-width', d => (d.highlighted || d.hover ? '3px' : '2px'))
-      .style('stroke-opacity', d =>
-        selectedCrews.size > 0 ? (d.highlighted || d.hover ? '1' : '0.5') : '1'
-      );
-
-    const crews = crewContainer
-      .selectAll('path.active')
-      .data(d => d.valuesSplit);
-
-    crews.exit().remove();
-
-    crews
-      .classed('blades', d => d.blades)
-      .classed('spoons', d => d.spoons)
-      .style('stroke-dasharray', d =>
-        d.blades ? '10,5' : d.spoons ? '5,5' : null
-      )
-      .attr('d', d => lineFunc(d.values));
-
-    crews
-      .enter()
-      .append('path')
-      .attr('class', 'active')
-      .style('cursor', 'pointer')
-      .classed('blades', d => d.blades)
-      .classed('spoons', d => d.spoons)
-      .style('stroke-dasharray', d =>
-        d.blades ? '10,5' : d.spoons ? '5,5' : null
-      )
-      .attr('d', d => lineFunc(d.values));
-
-    const crewsBackground = crewContainer
-      .selectAll('path.background')
-      .data(d => [d], d => d.name);
-
-    crewsBackground.exit().remove();
-
-    crewsBackground
-      .enter()
-      .append('path')
-      .attr('class', 'background')
-      .attr('d', d => lineFunc(d.values))
-      .style('stroke-opacity', '0.1');
-
-    crewsBackground.attr('d', d => lineFunc(d.values));
-  }
-
-  function renderFinishLabel(
-    crews,
-    g,
-    finishLabelIndex,
-    yScale,
-    transitionLength,
-    toggleSelectedCrew,
-    highlightCrew
-  ) {
-    const calculateFinishLabelPosition = d => {
-      let index = finishLabelIndex;
-      while (
-        (d.values.find(v => v.day === index) === undefined ||
-          d.values.find(v => v.day === index).pos === -1) &&
-        index > finishLabelIndex - 4
-      ) {
-        index -= 1;
-      }
-
-      return d.values.find(v => v.day === index).pos;
-    };
-
-    const finishLabel = g
-      .selectAll('.finish-label')
-      .data(
-        crews.filter(d => calculateFinishLabelPosition(d) > -1),
-        d => d.name
-      );
-
-    finishLabel
-      .enter()
-      .append('text')
-      .on('click', d => {
-        toggleSelectedCrew(d.name);
-      })
-      .on('mouseover', d => {
-        // Only act on mouseover if touch is unavailable
-        if (!('ontouchstart' in window || navigator.maxTouchPoints)) {
-          highlightCrew(d.name);
-        }
-      })
-      .on('mouseout', () => {
-        highlightCrew(null);
-      })
-      .attr('class', d => 'label finish-label ' + d.name.replace(/ /g, '-'))
-      .classed('highlighted', d => d.highlighted)
-      .style('font-weight', d => (d.highlighted ? 'bold' : 'normal'))
-      .datum(d => ({
-        name: d.name,
-        set: d.set,
-        gender: d.gender,
-        pos: calculateFinishLabelPosition(d),
-      }))
-      .attr('x', 10)
-      .attr('dy', '.35em')
-      .text(d => renderName(d.name, _data.set))
-      .attr(
-        'transform',
-        d =>
-          `translate(${((5 * numYearsToView - 1) / 4) *
-            widthOfOneYear},${yScale(d.pos)})`
-      )
-      .style('font-size', '16px')
-      .style('cursor', 'pointer');
-
-    finishLabel
-      .classed('highlighted', d => d.highlighted || d.hover)
-      .style('font-weight', d => (d.highlighted || d.hover ? 'bold' : 'normal'))
-      .transition()
-      .duration(transitionLength)
-      .attr(
-        'transform',
-        d =>
-          `translate(${((5 * numYearsToView - 1) / 4) *
-            widthOfOneYear},${yScale(calculateFinishLabelPosition(d))})`
-      );
-
-    finishLabel.exit().remove();
-  }
-
-  function renderStartLabel(
-    crews,
-    labelsGroup,
-    startLabelIndex,
-    yScale,
-    transitionLength,
-    toggleSelectedCrew,
-    highlightCrew
-  ) {
-    const calculateStartLabelPosition = d => {
-      let startValue = d.values.find(x => x.day === startLabelIndex);
-
-      if (startValue === undefined) {
-        startValue = d.values.find(x => x.day === startLabelIndex - 1);
-      }
-
-      return startValue.pos;
-    };
-
-    const startLabel = labelsGroup
-      .selectAll('.start-label')
-      .data(
-        crews.filter(d => calculateStartLabelPosition(d) > -1),
-        d => d.name
-      );
-
-    startLabel
-      .enter()
-      .append('text')
-      .on('click', d => {
-        toggleSelectedCrew(d.name);
-      })
-      .on('mouseover', d => {
-        highlightCrew(d.name);
-      })
-      .on('mouseout', () => {
-        highlightCrew(null);
-      })
-      .attr('class', d => 'label start-label ' + d.name.replace(/ /g, '-'))
-      .classed('highlighted', d => d.highlighted)
-      .style('font-weight', d => (d.highlighted ? 'bold' : 'normal'))
-      .datum(d => ({
-        name: d.name,
-        set: d.set,
-        gender: d.gender,
-        pos: calculateStartLabelPosition(d),
-      }))
-      .attr('x', -10)
-      .attr('dy', '.35em')
-      .attr('text-anchor', 'end')
-      .text(d => renderName(d.name, _data.set))
-      .attr('transform', d => `translate(0,${yScale(d.pos)})`)
-      .style('font-size', '16px')
-      .style('cursor', 'pointer');
-
-    startLabel
-      .classed('highlighted', d => d.highlighted || d.hover)
-      .style('font-weight', d => (d.highlighted || d.hover ? 'bold' : 'normal'))
-      .transition()
-      .duration(transitionLength)
-      .attr(
-        'transform',
-        d => `translate(0,${yScale(calculateStartLabelPosition(d))})`
-      );
-
-    startLabel.exit().remove();
-  }
-
-  function renderNumbersRight(
-    crews,
-    labelsGroup,
-    finishLabelIndex,
-    numYearsToView,
-    yScale,
-    transitionLength
-  ) {
-    // TODO: Extract out into reusable function
-    const calculateFinishLabelPosition = d => {
-      let index = finishLabelIndex;
-      while (
-        (d.values.find(v => v.day === index) === undefined ||
-          d.values.find(v => v.day === index).pos === -1) &&
-        index > finishLabelIndex - 4
-      ) {
-        index -= 1;
-      }
-
-      return d.values.find(v => v.day === index).pos;
-    };
-
-    const numbersRight = labelsGroup
-      .selectAll('.position-label-right')
-      .data(
-        range(
-          0,
-          crews.filter(d => calculateFinishLabelPosition(d) > -1).length
-        ),
-        d => d
-      );
-
-    numbersRight
-      .enter()
-      .append('text')
-      .attr('class', 'position-label-right')
-      .text((d, i) => i + 1)
-      .style('fill', '#888888')
-      .attr('dy', '.35em')
-      .attr('text-anchor', 'end')
-      .attr(
-        'transform',
-        (d, i) =>
-          `translate(${((5 * numYearsToView + 5) / 4) *
-            widthOfOneYear},${yScale(i + 1)})`
-      )
-      .transition()
-      .duration(transitionLength)
-      .style('font-size', '16px')
-      .style('opacity', 1);
-
-    numbersRight
-      .transition()
-      .duration(transitionLength)
-      .attr(
-        'transform',
-        (d, i) =>
-          `translate(${((5 * numYearsToView + 5) / 4) *
-            widthOfOneYear},${yScale(i + 1)})`
-      );
-
-    numbersRight
-      .exit()
-      .transition()
-      .duration(transitionLength)
-      .style('opacity', 0)
-      .remove();
-  }
-
-  function renderNumbersLeft(
-    divisions,
-    labelsGroup,
-    startYear,
-    yScale,
-    transitionLength
-  ) {
-    const numbers = [];
-    let startYearDivisions = divisions.find(x => x.year === startYear);
-
-    if (startYearDivisions === undefined) {
-      startYearDivisions = divisions.find(x => x.year === startYear - 1);
+        renderNumbersLeft(
+            results.divisions,
+            labelsGroup,
+            yearRange.start,
+            yScale,
+            transitionLength
+        );
     }
 
-    startYearDivisions.divisions.forEach(d => {
-      for (let i = 0; i < d.size; i++) {
-        numbers.push(i + 1);
-      }
-    });
+    function selectYear(start, end) {
+        yearRange = { start: start, end: end };
+        render();
+        listeners.call('selectYear', chart, start, end);
+    }
 
-    const numbersLeft = labelsGroup
-      .selectAll('.position-label-left')
-      .data(numbers, (d, i) => i);
+    function toggleSelectedCrew(name) {
+        if (selectedCrews.has(name)) {
+            selectedCrews.delete(name);
+        } else {
+            selectedCrews.add(name);
+        }
 
-    numbersLeft
-      .enter()
-      .append('text')
-      .attr('class', 'position-label-left')
-      .text(d => d)
-      .style('fill', '#888888')
-      .attr('dy', '.35em')
-      .attr('text-anchor', 'start')
-      .attr(
-        'transform',
-        (d, i) => `translate(${(-5.6 * widthOfOneYear) / 4},${yScale(i + 1)})`
-      )
-      .transition()
-      .duration(transitionLength)
-      .style('font-size', '16px')
-      .style('opacity', 1);
+        render();
+        listeners.call('toggleSelectedCrew', chart, name);
+    }
 
-    numbersLeft
-      .transition()
-      .duration(transitionLength)
-      .text(d => d)
-      .attr(
-        'transform',
-        (d, i) => `translate(${(-5.6 * widthOfOneYear) / 4},${yScale(i + 1)})`
-      );
+    function highlightCrew(name) {
+        highlightedCrew = name;
+        render();
+        listeners.call('highlightCrew', chart, name);
+    }
 
-    numbersLeft
-      .exit()
-      .transition()
-      .duration(transitionLength)
-      .style('opacity', 0)
-      .remove();
-  }
+    function createClipPath(svg) {
+        const clipPathId = 'clip' + ((Math.random() * 100000) | 0); // TODO: Require a unique id
 
-  chart.year = function(_) {
-    if (!arguments.length) return year;
-    year = _;
+        svg
+            .append('clipPath')
+            .attr('id', clipPathId)
+            .append('rect')
+            .attr('width', 80)
+            .attr('height', 800);
+
+        const clipPathUrl = 'url(#' + clipPathId + ')';
+
+        svg.select('.results-container').attr('clip-path', clipPathUrl);
+    }
+
+    function createDropShadowFilter(svg) {
+        const defs = svg.append('defs');
+
+        const dropShadowFilter = defs
+            .append('filter')
+            .attr('filterUnits', 'userSpaceOnUse')
+            .attr('width', 100000) // FIXME: Should depend on data
+            .attr('id', 'dropShadow');
+
+        dropShadowFilter
+            .append('feGaussianBlur')
+            .attr('stdDeviation', 0)
+            .attr('in', 'SourceAlpha');
+
+        dropShadowFilter
+            .append('feOffset')
+            .attr('dx', 0)
+            .attr('dy', 2);
+
+        const dropShadowMerge = dropShadowFilter.append('feMerge');
+        dropShadowMerge.append('feMergeNode');
+        dropShadowMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+    }
+
+    function renderClipPath(svg, viewBoxHeight) {
+        svg
+            .select('clipPath')
+            .select('rect')
+            .datum(numYearsToView)
+            .attr('width', d => ((d * 5 - 1) / 4) * widthOfOneYear)
+            .attr('height', viewBoxHeight + 16); // TODO: Work out why we need to extend the height
+    }
+
+    function renderDivisions(results, g, xScale, yScale) {
+        const divisionContainer = g
+            .selectAll('.division-year')
+            .data(results.divisions, d => d.year);
+
+        divisionContainer.exit().remove();
+
+        const divisionContainerEnter = divisionContainer
+            .enter()
+            .append('g')
+            .attr('class', 'division-year')
+            .attr('id', d => d.year);
+
+        divisionContainerEnter
+            .selectAll('rect.division')
+            .data(d =>
+                d.divisions.map(division => ({
+                    start: division.start,
+                    size: division.size,
+                    startDay: d.startDay,
+                    numDays: d.numDays,
+                }))
+            )
+            .enter()
+            .append('rect')
+            .attr('class', 'division')
+            .attr('id', d => d.start)
+            .style('stroke', divisionOutlineStrokeColor)
+            .style('fill', (d, i) => (divisionColors[i % 2]))
+            .attr('y', d => yScale(d.start - 0.5))
+            .attr('width', widthOfOneYear)
+            .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
+
+        divisionContainerEnter
+            .merge(divisionContainer)
+            .attr('transform', d => `translate(${xScale(d.startDay)},0)`);
+
+        const division = divisionContainer.selectAll('rect.division').data(d =>
+            d.divisions.map(division => ({
+                start: division.start,
+                size: division.size,
+                startDay: d.startDay,
+                numDays: d.numDays,
+            }))
+        );
+
+        division
+            .enter()
+            .append('rect')
+            .attr('class', 'division')
+            .attr('id', d => d.start)
+            .style('stroke', 'black')
+            .style('fill', (d, i) => (divisionColors[i % 2]))
+            .attr('y', d => yScale(d.start - 0.5))
+            .attr('width', widthOfOneYear)
+            .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
+
+        const rects = divisionContainer.selectAll('rect.division').data(d =>
+            d.divisions.map(division => ({
+                start: division.start,
+                size: division.size,
+                startDay: d.startDay,
+                numDays: d.numDays,
+            }))
+        );
+
+        rects.exit().remove();
+
+        rects
+            .attr('y', d => yScale(d.start - 0.5))
+            .attr('width', widthOfOneYear)
+            .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
+
+        rects
+            .enter()
+            .append('rect')
+            .attr('class', 'division')
+            .attr('id', d => d.start)
+            .style('stroke', 'black')
+            .style('fill', (d, i) => (divisionColors[i % 2]))
+            .attr('y', d => yScale(d.start - 0.5))
+            .attr('width', widthOfOneYear)
+            .attr('height', d => yScale(d.start + d.size) - yScale(d.start));
+    }
+
+    function renderYears(results, g, xScale, yScale) {
+        const years = g
+            .selectAll('.year')
+            .data(results.divisions.map(d => d.year), d => d);
+
+        years
+            .enter()
+            .append('text')
+            .attr('class', 'year')
+            .attr('x', d => {
+                const division = results.divisions.find(
+                    division => division.year === d
+                );
+
+                if (division === undefined) {
+                    return;
+                }
+
+                return xScale(division.startDay + division.numDays / 2);
+            })
+            .attr('y', yScale(0))
+            .style('font-size', yearsFontSize)
+            .attr('text-anchor', 'middle')
+            .text(d => d);
+
+        years.attr('x', d => {
+            const division = results.divisions.find(division => division.year === d);
+
+            if (division === undefined) {
+                return;
+            }
+
+            return xScale(division.startDay + division.numDays / 2);
+        });
+
+        years.exit().remove();
+    }
+
+    function renderCrews(data, g, xScale, yScale, selectedCrews) {
+        const lineFunc = line()
+            .defined(d => d !== null && d.pos > -1)
+            .x(d => xScale(d.day))
+            .y(d => yScale(d.pos));
+
+        const crewContainer = g.selectAll('.line').data(data, d => d.name);
+
+        crewContainer.exit().remove();
+
+        const crewContainerEnter = crewContainer
+            .enter()
+            .append('g')
+            .attr('class', d => `line ${d.name.replace(/ /g, '-')}`)
+            .classed('highlighted', d => d.highlighted)
+            .style('filter', d =>
+                resultLineDropShadow ? (d.highlighted || d.hover ? 'url(#dropShadow)' : '') : ''
+            )
+            .style('fill', 'none')
+            .style('stroke', d =>
+                // TODO: Retain existing color-on-hover behaviour
+                //d.highlighted || d.hover ? crewColor(d.name) : resultLineColor
+                crewColor(d.name, _data.set)
+            )
+            .style('stroke-width', d => (d.highlighted || d.hover ? strokeWidthHighlighed : strokeWidthHover))
+            .style('stroke-opacity', d =>
+                selectedCrews.size > 0 || highlightFilterTerm.length > 0 ? (d.highlighted || d.hover ? resultLineOpacityFull : resultLineOpacityFaded) : resultLineOpacityFull
+            );
+
+        crewContainerEnter
+            .selectAll('path.active')
+            .data(d => d.valuesSplit)
+            .enter()
+            .append('path')
+            .attr('class', 'active')
+            .style('cursor', 'pointer')
+            .classed('blades', d => d.blades)
+            .classed('spoons', d => d.spoons)
+            .style('stroke-dasharray', d =>
+                d.blades ? '10,5' : d.spoons ? '5,5' : null
+            )
+            .attr('d', d => lineFunc(d.values));
+
+        crewContainerEnter
+            .selectAll('path.background')
+            .data(d => [d], d => d.name)
+            .enter()
+            .append('path')
+            .attr('class', 'background')
+            .attr('d', d => lineFunc(d.values))
+            .style('stroke-opacity', '0.1');
+
+        crewContainerEnter
+            .merge(crewContainer)
+            .classed('highlighted', d => d.highlighted)
+            .style('filter', d =>
+                resultLineDropShadow ? (d.highlighted || d.hover ? 'url(#dropShadow)' : '') : ''
+            )
+            .style('fill', 'none')
+            .style('stroke', d =>
+                // TODO: Retain existing color-on-hover behaviour
+                //d.highlighted || d.hover ? crewColor(d.name) : resultLineColor
+                crewColor(d.name, _data.set)
+            )
+            .style('stroke-width', d => (d.highlighted || d.hover ? '3px' : '2px'))
+            .style('stroke-opacity', d =>
+                selectedCrews.size > 0 || highlightFilterTerm.length > 0 ? (d.highlighted || d.hover ? resultLineOpacityFull : resultLineOpacityFaded) : resultLineOpacityFull
+            );
+
+        const crews = crewContainer
+            .selectAll('path.active')
+            .data(d => d.valuesSplit);
+
+        crews.exit().remove();
+
+        crews
+            .classed('blades', d => d.blades)
+            .classed('spoons', d => d.spoons)
+            .style('stroke-dasharray', d =>
+                d.blades ? '10,5' : d.spoons ? '5,5' : null
+            )
+            .attr('d', d => lineFunc(d.values));
+
+        crews
+            .enter()
+            .append('path')
+            .attr('class', 'active')
+            .style('cursor', 'pointer')
+            .classed('blades', d => d.blades)
+            .classed('spoons', d => d.spoons)
+            .style('stroke-dasharray', d =>
+                d.blades ? '10,5' : d.spoons ? '5,5' : null
+            )
+            .attr('d', d => lineFunc(d.values));
+
+        const crewsBackground = crewContainer
+            .selectAll('path.background')
+            .data(d => [d], d => d.name);
+
+        crewsBackground.exit().remove();
+
+        crewsBackground
+            .enter()
+            .append('path')
+            .attr('class', 'background')
+            .attr('d', d => lineFunc(d.values))
+            .style('stroke-opacity', '0.1');
+
+        crewsBackground.attr('d', d => lineFunc(d.values));
+    }
+
+    function renderFinishLabel(
+        crews,
+        g,
+        finishLabelIndex,
+        yScale,
+        transitionLength,
+        toggleSelectedCrew,
+        highlightCrew
+    ) {
+        const calculateFinishLabelPosition = d => {
+            let index = finishLabelIndex;
+            while (
+                (d.values.find(v => v.day === index) === undefined ||
+                    d.values.find(v => v.day === index).pos === -1) &&
+                index > finishLabelIndex - 4
+            ) {
+                index -= 1;
+            }
+
+            return d.values.find(v => v.day === index).pos;
+        };
+
+        const finishLabel = g
+            .selectAll('.finish-label')
+            .data(
+                crews.filter(d => calculateFinishLabelPosition(d) > -1),
+                d => d.name
+            );
+
+        finishLabel
+            .enter()
+            .append('text')
+            .on('click', d => {
+                toggleSelectedCrew(d.name);
+            })
+            .on('mouseover', d => {
+                // Only act on mouseover if touch is unavailable
+                if (!('ontouchstart' in window || navigator.maxTouchPoints)) {
+                    highlightCrew(d.name);
+                }
+            })
+            .on('mouseout', () => {
+                highlightCrew(null);
+            })
+            .attr('class', d => 'label finish-label ' + d.name.replace(/ /g, '-'))
+            .classed('highlighted', d => d.highlighted)
+            .style('font-weight', d => (d.highlighted ? 'bold' : 'normal'))
+            .datum(d => ({
+                name: d.name,
+                set: d.set,
+                gender: d.gender,
+                pos: calculateFinishLabelPosition(d),
+            }))
+            .attr('x', 10)
+            .attr('dy', '.35em')
+            .text(d =>
+                // Display names of highlighted crews only
+                // TODO: Retain existing behaviour
+                (selectedCrews.size > 0 || highlightFilterTerm.length > 0) ? (d.highlighted || d.hover ? renderName(d.name, _data.set) : '') : renderName(d.name, _data.set))
+            .attr(
+                'transform',
+                d =>
+                `translate(${((5 * numYearsToView - 1) / 4) *
+            widthOfOneYear},${yScale(d.pos)})`
+            )
+            .style('font-size', labelFontSize)
+            .style('cursor', 'pointer');
+
+        finishLabel
+            .classed('highlighted', d => d.highlighted || d.hover)
+            .style('font-weight', d => (d.highlighted || d.hover ? 'bold' : 'normal'))
+            .text(d =>
+                // Display names of highlighted crews only
+                // TODO: Retain existing behaviour
+                (selectedCrews.size > 0 || highlightFilterTerm.length > 0) ? (d.highlighted || d.hover ? renderName(d.name, _data.set) : '') : renderName(d.name, _data.set))
+            .transition()
+            .duration(transitionLength)
+            .attr(
+                'transform',
+                d =>
+                `translate(${((5 * numYearsToView - 1) / 4) *
+            widthOfOneYear},${yScale(calculateFinishLabelPosition(d))})`
+            );
+
+        finishLabel.exit().remove();
+    }
+
+    function renderStartLabel(
+        crews,
+        labelsGroup,
+        startLabelIndex,
+        yScale,
+        transitionLength,
+        toggleSelectedCrew,
+        highlightCrew
+    ) {
+        const calculateStartLabelPosition = d => {
+            let startValue = d.values.find(x => x.day === startLabelIndex);
+
+            if (startValue === undefined) {
+                startValue = d.values.find(x => x.day === startLabelIndex - 1);
+            }
+
+            return startValue.pos;
+        };
+
+        const startLabel = labelsGroup
+            .selectAll('.start-label')
+            .data(
+                crews.filter(d => calculateStartLabelPosition(d) > -1),
+                d => d.name
+            );
+
+        startLabel
+            .enter()
+            .append('text')
+            .on('click', d => {
+                toggleSelectedCrew(d.name);
+            })
+            .on('mouseover', d => {
+                highlightCrew(d.name);
+            })
+            .on('mouseout', () => {
+                highlightCrew(null);
+            })
+            .attr('class', d => 'label start-label ' + d.name.replace(/ /g, '-'))
+            .classed('highlighted', d => d.highlighted)
+            .style('font-weight', d => (d.highlighted ? 'normal' : 'normal'))
+            .datum(d => ({
+                name: d.name,
+                set: d.set,
+                gender: d.gender,
+                highlighted: d.highlighted,
+                pos: calculateStartLabelPosition(d),
+            }))
+            .attr('x', -10)
+            .attr('dy', '.35em')
+            .attr('text-anchor', 'end')
+            .text(d =>
+                // Display names of highlighted crews only
+                // TODO: Retain existing behaviour
+                (selectedCrews.size > 0 || highlightFilterTerm.length > 0) ? (d.highlighted || d.hover ? renderName(d.name, _data.set) : '') : renderName(d.name, _data.set))
+            .attr('transform', d => `translate(0,${yScale(d.pos)})`)
+            .style('font-size', labelFontSize)
+            .style('cursor', 'pointer');
+
+        startLabel
+            .classed('highlighted', d => d.highlighted || d.hover)
+            .style('font-weight', d => (d.highlighted || d.hover ? 'bold' : 'normal'))
+            .text(d =>
+                // Display names of highlighted crews only
+                // TODO: Retain existing behaviour
+                (selectedCrews.size > 0 || highlightFilterTerm.length > 0) ? (d.highlighted || d.hover ? renderName(d.name, _data.set) : '') : renderName(d.name, _data.set))
+            .transition()
+            .duration(transitionLength)
+            .attr(
+                'transform',
+                d => `translate(0,${yScale(calculateStartLabelPosition(d))})`
+            );
+
+        startLabel.exit().remove();
+    }
+
+    function renderNumbersRight(
+        crews,
+        labelsGroup,
+        finishLabelIndex,
+        numYearsToView,
+        yScale,
+        transitionLength
+    ) {
+        // TODO: Extract out into reusable function
+        const calculateFinishLabelPosition = d => {
+            let index = finishLabelIndex;
+            while (
+                (d.values.find(v => v.day === index) === undefined ||
+                    d.values.find(v => v.day === index).pos === -1) &&
+                index > finishLabelIndex - 4
+            ) {
+                index -= 1;
+            }
+
+            return d.values.find(v => v.day === index).pos;
+        };
+
+        const numbersRight = labelsGroup
+            .selectAll('.position-label-right')
+            .data(
+                range(
+                    0,
+                    crews.filter(d => calculateFinishLabelPosition(d) > -1).length
+                ),
+                d => d
+            );
+
+        numbersRight
+            .enter()
+            .append('text')
+            .attr('class', 'position-label-right')
+            .text((d, i) => i + 1)
+            .style('fill', '#888888')
+            .attr('dy', '.35em')
+            .attr('text-anchor', 'end')
+            .attr(
+                'transform',
+                (d, i) =>
+                `translate(${((5 * numYearsToView + 5) / 4) *
+            widthOfOneYear},${yScale(i + 1)})`
+            )
+            .transition()
+            .duration(transitionLength)
+            .style('font-size', labelFontSize)
+            .style('opacity', 1);
+
+        numbersRight
+            .transition()
+            .duration(transitionLength)
+            .attr(
+                'transform',
+                (d, i) =>
+                `translate(${((5 * numYearsToView + 5) / 4) *
+            widthOfOneYear},${yScale(i + 1)})`
+            );
+
+        numbersRight
+            .exit()
+            .transition()
+            .duration(transitionLength)
+            .style('opacity', 0)
+            .remove();
+    }
+
+    function renderNumbersLeft(
+        divisions,
+        labelsGroup,
+        startYear,
+        yScale,
+        transitionLength
+    ) {
+        const numbers = [];
+        let startYearDivisions = divisions.find(x => x.year === startYear);
+
+        if (startYearDivisions === undefined) {
+            startYearDivisions = divisions.find(x => x.year === startYear - 1);
+        }
+
+        startYearDivisions.divisions.forEach(d => {
+            for (let i = 0; i < d.size; i++) {
+                numbers.push(i + 1);
+            }
+        });
+
+        const numbersLeft = labelsGroup
+            .selectAll('.position-label-left')
+            .data(numbers, (d, i) => i);
+
+        numbersLeft
+            .enter()
+            .append('text')
+            .attr('class', 'position-label-left')
+            .text(d => d)
+            .style('fill', '#888888')
+            .attr('dy', '.35em')
+            .attr('text-anchor', 'start')
+            .attr(
+                'transform',
+                (d, i) => `translate(${(-5.6 * widthOfOneYear) / 4},${yScale(i + 1)})`
+            )
+            .transition()
+            .duration(transitionLength)
+            .style('font-size', labelFontSize)
+            .style('opacity', 1);
+
+        numbersLeft
+            .transition()
+            .duration(transitionLength)
+            .text(d => d)
+            .attr(
+                'transform',
+                (d, i) => `translate(${(-5.6 * widthOfOneYear) / 4},${yScale(i + 1)})`
+            );
+
+        numbersLeft
+            .exit()
+            .transition()
+            .duration(transitionLength)
+            .style('opacity', 0)
+            .remove();
+    }
+
+    chart.viewPeriodWithHighlight = function(start, numberOfYears, highlightTerm) {
+        year = start;
+        numYearsToView = numberOfYears;
+        highlightFilterTerm = highlightTerm;
+        console.log(highlightTerm);
+        render();
+        return chart;
+    }
+
+    chart.year = function(_) {
+        if (!arguments.length) return year;
+        year = _;
+        render();
+        return chart;
+    };
+
+    chart.numYearsToView = function(_) {
+        if (!arguments.length) return numYearsToView;
+        numYearsToView = _;
+        render();
+        return chart;
+    };
+
+    chart.highlightedCrew = function(_) {
+        if (!arguments.length) return highlightedCrew;
+        highlightedCrew = _;
+        return chart;
+    };
+
+    chart.highlightFilterTerm = function(_) {
+        if (!arguments.length) return highlightFilterTerm;
+        highlightFilterTerm = _;
+        render();
+        return chart;
+    }
+
+    chart.selectedCrews = function(_) {
+        if (!arguments.length) return selectedCrews;
+        selectedCrews = _;
+        return chart;
+    };
+
+    chart.windowWidth = function(_) {
+        if (!arguments.length) return windowWidth;
+        windowWidth = _;
+        return chart;
+    };
+
+    chart.on = function() {
+        const value = listeners.on.apply(listeners, arguments);
+        return value === listeners ? chart : value;
+    };
+
     return chart;
-  };
-
-  chart.numYearsToView = function(_) {
-    if (!arguments.length) return numYearsToView;
-    numYearsToView = _;
-    return chart;
-  };
-
-  chart.highlightedCrew = function(_) {
-    if (!arguments.length) return highlightedCrew;
-    highlightedCrew = _;
-    return chart;
-  };
-
-  chart.selectedCrews = function(_) {
-    if (!arguments.length) return selectedCrews;
-    selectedCrews = _;
-    return chart;
-  };
-
-  chart.windowWidth = function(_) {
-    if (!arguments.length) return windowWidth;
-    windowWidth = _;
-    return chart;
-  };
-
-  chart.on = function() {
-    const value = listeners.on.apply(listeners, arguments);
-    return value === listeners ? chart : value;
-  };
-
-  return chart;
 }
